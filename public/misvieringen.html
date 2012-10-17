@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <title>Misvieringen</title>
+  
+  <script type='text/javascript' src='http://code.jquery.com/jquery-1.8.2.js'></script>
+  <script type='text/javascript' src="http://masonry.desandro.com/jquery.masonry.min.js"></script><!-- TODO put local -->
+  <script type="text/javascript"
+    src="http://maps.googleapis.com/maps/api/js?key=AIzaSyBY_2Z83n6MTrt89dTgMpeOHnn_OBieSIQ&sensor=true">
+  </script>
+  
+  <style type='text/css'>
+
+body {
+  font-family: Arial, Verdana, Helvetica, sans-serif;
+  font-size: 11px;
+}
+
+.item {
+  width: 480px;
+  margin: 10px;
+  float: left;
+}
+
+h1 {
+  background-color: #E2E2E2;
+  padding-bottom: 5px;
+  padding-left: 9px;
+  padding-right: 5px;
+  padding-top: 15px;
+  font-size: 12px;
+  font-weight: bold;
+  margin: 0px;
+}
+
+.intro {
+  color: #333;
+  padding-left: 9px;
+  padding-right: 5px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.control {
+  color: #333;
+  background-color: #F1F1F1;
+  padding-left: 9px;
+  padding-right: 5px;
+}
+
+.controls {
+  border: 1px solid #A7A7A7;
+}
+
+#map {
+  height: 480px;
+}
+
+#map p {
+  margin: 0pt;
+}
+
+#results ol {
+  padding: 0px;
+  margin: 0px;
+}
+
+#results li { 
+  padding: 5px;
+  cursor: hand; 
+  cursor: pointer; 
+  list-style: none;
+  background-color: #F1F1F1;
+  border: 1px solid #A7A7A7;
+  color: #333;
+  margin-bottom: 10px;
+}
+
+.time {
+  font-weight: bold;
+}
+
+  </style>
+
+  <script type='text/javascript'>//<![CDATA[ 
+
+var mapOptions, map, markers = {}, markerBounds, infoWindow, myLocation = '', geohashlist, latitude, longitude, pinColor, pinImage, pinShadow, thisDay, nextDay, thisHour;
+var weekdays = {0:"Zo",1:"Ma",2:"Di",3:"Wo",4:"Do",5:"Vr",6:"Za","Zo":0,"Ma":1,"Di":2,"Wo":3,"Do":4,"Vr":5,"Za":6};
+
+// these are the controls:
+var myLocation = '', range = 3, futureDays = 2; // futureDays not used for time being
+
+$(document).ready(function() {
+    // kick off Masonry
+    $('#container').masonry({
+      // options
+      itemSelector : '.item',
+      columnWidth : 500
+    });
+    // start building contents
+    initialize();
+});
+
+function initialize() {
+    pinColor = "FFFFFF";
+    pinImage = new google.maps.MarkerImage("http://chart.apis.google.com/chart?chst=d_map_pin_letter&chld=%E2%80%A2|" + pinColor,
+        new google.maps.Size(21, 34),
+        new google.maps.Point(0,0),
+        new google.maps.Point(10, 34));
+    pinShadow = new google.maps.MarkerImage("http://chart.apis.google.com/chart?chst=d_map_pin_shadow",
+        new google.maps.Size(40, 37),
+        new google.maps.Point(0, 0),
+        new google.maps.Point(12, 35));
+    thisDay = weekdays[(new Date()).getDay()];
+    thisHour = (new Date()).getHours();
+    if (navigator.geolocation) {
+        // Use method getCurrentPosition to get coordinates
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                // set global variables
+                latitude = position.coords.latitude;
+                longitude = position.coords.longitude;
+                prepareMap();
+            },
+            function() {
+                prepareDefaultMap();
+            }
+        );
+    }
+    else {
+        prepareDefaultMap();
+    }
+    // clicking the results list also pops up the infoWindow
+    $('#results').delegate('li','click',function() {
+        var geohash = $(this).attr('class');
+        var marker = markers[geohash].marker;
+        infoWindow.setContent(marker.html);
+        infoWindow.open(map, marker);
+    });
+}
+
+function prepareDefaultMap() {
+    // create map options based on default coordinates 
+    mapOptions = {
+        center: new google.maps.LatLng(51.222080, 4.397710),
+        zoom: 8,
+        mapTypeId: google.maps.MapTypeId.ROADMAP
+    };
+    // continue
+    addmap();
+} 
+
+function prepareMap() {
+    // create map options
+    mapOptions = {
+        center: new google.maps.LatLng(latitude, longitude),
+        zoom: 8,
+        mapTypeId: google.maps.MapTypeId.ROADMAP
+    };
+    // continue
+    addmap();
+}
+
+function addmap() {
+    // draw the map
+    map = new google.maps.Map(document.getElementById("map"), mapOptions);
+    infoWindow = new google.maps.InfoWindow({
+      content: "holding..."
+    });    
+    // add event handlers for location field
+    $('#location').change(function() {
+        getlocation();
+    });
+    // set the markers, only if coordinates are set
+    if (latitude && longitude) {
+        getrange();
+    }
+}
+
+function getlocation() {
+    $('#status').html("Locatie zoeken&hellip;"); 
+    if ($('#location').val() !== '') {
+        myLocation = $('#location').val();
+        var yqlParam = 'use "http://www.datatables.org/google/google.geocoding.xml" as google.geocoding; select * from google.geocoding where q="%location"';
+        var yql = yqlParam.replace('%location',myLocation);
+        yqlRun(yql,function(data) {
+            var placemarks = data.query.results.json.Placemark;
+            var placemark = $.isArray(placemarks) ? placemarks[0] : placemarks;
+            latitude = placemark.Point.coordinates[1];
+            longitude = placemark.Point.coordinates[0]; 
+            if (latitude !== 0 || longitude !== 0) {
+              getrange();
+            }
+        });
+    }
+}
+
+function getrange() {
+    resetmarkers();
+    var l;
+    l = latitude + ',' + longitude;
+    var yqlParam = 'use "https://raw.github.com/vicmortelmans/yql-tables/master/geo/geo.geohash.xml" as geo.geohash; use "https://raw.github.com/vicmortelmans/yql-tables/master/geo/geo.geohash.neighbors.xml" as geo.geohash.neighbors; select * from geo.geohash.neighbors where geohash in (select geohash from geo.geohash where place="%location" and precision=6) and range=%range';
+    var yql = yqlParam.replace('%location',l);
+    yql = yql.replace('%range',range);
+    yqlRun(yql,function(data) {
+        geohashlist = data.query.results.neighbors.geohash.join('+');
+        nextDay = 0;
+        getmarkers();
+    });
+}
+
+function getmarkers() {
+  var queryDay = weekdays[(weekdays[thisDay] + nextDay) % 7];
+  $('#status').html("Misvieringen op " + queryDay + "&hellip;"); 
+  var beginHour;
+  if (nextDay == 0) {
+    beginHour = ">=" + thisHour;
+  } else if (nextDay == 6) {
+    beginHour = "<" + thisHour;
+  } else {
+    beginHour = "> 0";
+  }
+  var urlParam = 'http://misvieringen.my28msec.com/dataset/queryRangeAndDay?range=%range&day=%day';
+  var url = urlParam.replace('%range',geohashlist);
+  url = url.replace('%day',queryDay);
+  var yqlParam = 'select * from xml where url="%url" and itemPath="//mass" and hour %beginHour | sort(field="hour", field="minutes")'
+  var yql = yqlParam.replace('%url', url);
+  yql = yql.replace('%beginHour', beginHour);
+  yqlRun(yql,function(data) {
+      putmarkers(data);
+  });
+}
+
+function resetmarkers() {
+  // reset the map viewport
+  //markerBounds = new google.maps.LatLngBounds();
+  // remove all markerks from the map
+  deleteOverlays();
+  // remove all masses from the list
+  $('#results ol').empty();
+  // add the 'home' marker
+  var position = new google.maps.LatLng(latitude,longitude);
+  var home = new google.maps.Marker({
+    position: position,
+    title: "ik ben hier",
+    icon: pinImage,
+    shadow: pinShadow,
+    map: map
+  });
+  home.setZIndex(-1);
+  //markerBounds.extend(position);
+  markers["home"] = {};
+  markers["home"].marker = home;
+  map.setCenter(position);
+  map.setZoom(13);
+}
+
+function putmarkers(data) {
+  if (data.query.results) {
+    $.each($.isArray(data.query.results.mass) ? data.query.results.mass : [data.query.results.mass], function(index, mass) {
+      // add the mass to the results list
+      var html = '<li class="' + mass["geohash-spot"] + '"><span class="time">%weekday %time</span>';
+      html += ' <span class="description">%description</span>';
+      html += ' <span class="parish">%name</span>';
+      html += ' <span class="location">%address</span></li>';
+      html = html
+      .replace('%weekday',mass["weekday-condition"])
+      .replace('%time',mass.time)
+      .replace('%address',mass.address)
+      .replace('%description',mass.description)
+      .replace('%name',mass.name);
+      $('#results ol').append(html);
+      $('#container').masonry();
+      // update map
+      var title = '<p><span class="parish"><a href="%url" target="_blank">%name</a></span></p>';
+      title += '<p><span class="location">%address</span></p>';
+      title = title
+      .replace('%address',mass.address)
+      .replace('%name',mass.name)
+      .replace('%url',mass.url);
+      var heading = '<p><span class="time">%weekday %time</span>';
+      heading += ' <span class="description">%description</span></p>';
+      heading = heading 
+      .replace('%weekday',mass["weekday-condition"])
+      .replace('%description',mass.description)
+      .replace('%time',mass.time);
+      if (markers[mass["geohash-spot"]]) {
+        // add data to the existing marker
+        markers[mass["geohash-spot"]].marker.html += heading;
+      } else {
+        // add a new marker
+        var position = new google.maps.LatLng(mass.lat,mass.lon);
+        var marker = new google.maps.Marker({
+          position: position,
+          title: mass.name,
+          map: map
+        });
+        markers[mass["geohash-spot"]] = {};
+        markers[mass["geohash-spot"]].marker = marker;
+        markers[mass["geohash-spot"]].marker.html = title + heading;
+        // add the infoWindow
+        google.maps.event.addListener(marker, 'click', function () {
+          infoWindow.setContent(this.html);
+          infoWindow.open(map, this);
+        });
+        //markerBounds.extend(position);
+        //map.fitBounds(markerBounds);
+      }
+    });
+  }
+  if (nextDay < 6) {
+    nextDay++;
+    getmarkers();
+  } else {
+    $('#status').empty();
+  }
+}
+
+function yqlRun(yql,callback) {
+    var url = "http://query.yahooapis.com/v1/public/yql?q=" + encodeURIComponent(yql) + "&diagnostics=true&format=json&callback=?";
+    $.getJSON(url,callback);
+}
+
+function deleteOverlays() {
+  if (markers) {
+    for (i in markers) {
+      markers[i].marker.setMap(null);
+    }
+    markers = {};
+  }
+}
+
+//]]>  
+
+  </script>
+
+</head>
+<body>
+    <div id="container">
+      <div id="controls" class="item">
+        <div class="controls"><!-- this div takes the border, so the parent div won't expand -->
+          <h1>MISVIERINGEN IN VLAANDEREN</h1>
+          <div class="intro">Hier vind je informatie over eucharistievieringen en andere liturgische diensten in jouw buurt. De informatie wordt overgenomen van de officiele website van de Vlaamse bisdommen <a href="http://www.kerknet.be">kerknet.be</a>. </div>
+          <div class="control">
+             <label for="location">Geef uw woonplaats of adres op: </label>
+             <input id="location" name="location" type="text" placeholder="locatie"/>
+             <button onclick="JavaScript:getlocation()">Zoek!</button>
+          </div>
+        </div>
+      </div>
+      <div id="map" class="item"></div>
+      <div id="results" class="item">
+          <ol>
+              
+          </ol>
+          <div id="status"></div>
+      </div>
+    </div>
+</body>
+
+</html>
+
