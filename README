@@ -1,0 +1,1 @@
+misvieringen is a 28msec project that scrapes data from kerknet.be about location and time of Holy Mass in the Flemish dioceses and that reproduces this data in a browser app, based on the user location, both as a list in chronological order and as a map with location markers.
